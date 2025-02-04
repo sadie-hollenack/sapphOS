@@ -35,12 +35,7 @@ void putchar(char ch) {
 }
 
 // sets a block of memory, starting at buf and ending at n to a specified value, c
-void *memset(void *buf, char c, size_t n) {
-	uint8_t *p = (uint8_t *) buf;
-	while (n--)
-		*p++=c;
-	return buf;
-}
+
 
 // main code of the kernel
 void kernel_main(void) {
