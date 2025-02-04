@@ -1,10 +1,12 @@
 #include "kernel.h"
+#include "common.h"
 
 // define types for unsigned ints
 typedef unsigned char uint8_t;
 typedef unsigned int uint32_t;
 typedef uint32_t size_t;
 
+// bss: section of the kernel stack of data with an inital value of zero
 // char type doesnt matter, we simply want the addresses of the symbols
 extern char __bss[], __bss_end[], __stack_top[];
 
@@ -28,6 +30,7 @@ struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4, lo
 }
 
 void putchar(char ch) {
+	// the 1 calls the sbi extension sbi_console_putchar(int ch)
 	sbi_call(ch, 0, 0, 0, 0, 0, 0, 1);
 }
 
@@ -43,12 +46,10 @@ void *memset(void *buf, char c, size_t n) {
 void kernel_main(void) {
 	// initialize the bss section to 0
 	memset(__bss, 0, (size_t) __bss_end - (size_t) __bss);
-	// creates a variable to write to the console
-	const char *s = "\n\nHello World!\n";
-	// writes it out to the console
-	for (int i = 0; s[i] != '\0'; i++) {
-		putchar(s[i]);
-	}
+	
+	printf("\n\nHello %s\n", "World!");
+	printf("1 + 2 = %d, %x\n", 1 + 2, 0x1234abcd);
+
 	// busy waits (this broke deepseeks ai LMAO)
 	for (;;){
 		// wait for interrupt
