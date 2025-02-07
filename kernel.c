@@ -22,7 +22,7 @@ struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4, lo
 	register long a6 __asm__("a6") = fid;
 	register long a7 __asm__("a7") = eid;
 
-	__asm__ __volatile__("ecall"
+	asmv("ecall"
 						: "=r"(a0), "=r"(a1)
 						: "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)  
 						: "memory");
@@ -40,8 +40,8 @@ void putchar(char ch) {
 __attribute__((naked))
 __attribute__((aligned(4)))
 void kernel_entry(void) {
-	__asm__ __volatile__(
-		"csrw sscratch, sp\n" // stores the stack pointer in a csr (control and status register) 
+	asmv(
+		"csrrw sp, sscratch, sp\n" // stores the stack pointer in a csr (control and status register) 
 							// sscratch is a special purpose register for storing the stack pointer
 		"addi sp, sp, -4 * 31\n" // subtract 4 * 31 from the stack pointer to store words above it in memory
 		"sw ra, 4 * 0(sp)\n" // store every register to the stack to preserve the state of the cpu
@@ -77,6 +77,10 @@ void kernel_entry(void) {
 
 		"csrr a0, sscratch\n" // save the orginal stack pointer to the stack
 		"sw a0, 4 * 30(sp)\n"
+
+		// reset the kernel stack
+		"addi a0, sp, 4 * 31\n"
+		"csrw sscratch, a0\n"
 
 		"mv a0, sp\n"
 		"call handle_trap\n" 
@@ -143,7 +147,7 @@ paddr_t alloc_pages(uint32_t n) {
 
 // allocates all registers to the top of the process's stack
 __attribute__((naked)) void switch_context(uint32_t *prev_sp, uint32_t *next_sp) {
-	__asm__ __volatile__(
+	asmv(
 		// Save callee-saved register onto the current process's stack
 		"addi sp, sp, -13 * 4\n" // Allocate stack space for 13 4-byte registers
         "sw ra,  0  * 4(sp)\n"   // Save callee-saved registers only
@@ -227,9 +231,41 @@ struct process *create_process(uint32_t pc) {
 
 void delay(void) {
 	for(int i = 0; i < 30000000; i++) {
-		__asm__ __volatile__("nop"); // do nothing
+		asmv("nop"); // do nothing
 	}
 }
+
+// Proccess scheduler
+// round robin
+struct process *current_proc;
+struct process *idle_proc;
+
+void yield(void) {
+	// Search for a runnable process
+	struct process *next = idle_proc;
+	for (int i = 0; i < PROCS_MAX; i++) {
+		struct process *proc = &procs[(current_proc->pid + i) % PROCS_MAX];
+		if (proc->state == PROC_RUNNABLE && proc->pid > 0) {
+			next = proc;
+			break;
+		}
+	}
+	if(next == current_proc) {
+		return;
+	}
+
+	asmv(
+		"csrw sscratch, %[sscratch]\n"
+		:
+		: [sscratch] "r" ((uint32_t) &next->stack[sizeof(next->stack)]) // calculates the top of the stack
+	);
+
+	// Context switch
+	struct process *prev = current_proc;
+	current_proc = next;
+	switch_context(&prev->sp, &next->sp);
+}
+
 // TEST PROCESSES
 struct process *proc_a;
 struct process *proc_b;
@@ -238,8 +274,7 @@ void proc_a_entry(void) {
 	printf("starting process A\n");
 	while(1) {
 		printf("fuck");
-		switch_context(&proc_a->sp, &proc_b->sp);
-		delay();
+		yield();
 	}
 }
 
@@ -247,8 +282,7 @@ void proc_b_entry(void) {
 	printf("starting process B\n");
 	while(1) {
 		printf("shit");
-		switch_context(&proc_b->sp, &proc_a->sp);
-		delay();
+		yield();
 	}
 }
 
@@ -269,10 +303,14 @@ void kernel_main(void) {
 	printf("\n\nHello %s\n", "World!");
 	printf("1 + 2 = %d, %x\n", 1 + 2, 0x1234abcd);
 
+	idle_proc = create_process((uint32_t) NULL);
+	idle_proc->pid = -1;
+	current_proc = idle_proc;
+
 	proc_a = create_process((uint32_t) proc_a_entry);
 	proc_b = create_process((uint32_t) proc_b_entry);
-	proc_a_entry();
 	
+	yield();
 	PANIC("unreachable here!");
 }
 
@@ -282,7 +320,7 @@ __attribute__((naked)) // adds no extra code to the function
 // (i belive it is the 128kb from the linker script)
 // then jumps to the kernel_main function
 void boot(void) {
-	__asm__ __volatile__(
+	asmv(
 		"mv sp, %[stack_top]\n"
 		"j kernel_main\n"
 		:
