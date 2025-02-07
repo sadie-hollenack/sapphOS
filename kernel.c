@@ -8,7 +8,7 @@ typedef uint32_t size_t;
 
 // bss: section of the kernel stack of data with an inital value of zero
 // char type doesnt matter, we simply want the addresses of the symbols
-extern char __bss[], __bss_end[], __stack_top[];
+extern char __bss[], __bss_end[], __stack_top[], __free_ram[], __free_ram_end[];
 
 // makes a call to the sbi allowing the user to make elevated calls
 // function will change depending on what values are passed into fid and eid
@@ -34,8 +34,7 @@ void putchar(char ch) {
 	sbi_call(ch, 0, 0, 0, 0, 0, 0, 1);
 }
 
-
-
+// ERROR HANDLING
 // stores all general registers then calls handle_trap
 // after handle_trap executes it restores all registers
 __attribute__((naked))
@@ -126,6 +125,23 @@ void handle_trap() {
 	PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval, user_pc);
 }
 
+
+// MEMORY MANAGEMENT
+// only issue with this solution is that memory is not deallocated
+paddr_t alloc_pages(uint32_t n) {
+	static paddr_t next_paddr = (paddr_t) __free_ram;
+	paddr_t paddr = next_paddr;
+	next_paddr += n * PAGE_SIZE;
+
+	if(next_paddr > (paddr_t) __free_ram_end) {
+		PANIC("out of memory");
+	}
+
+	memset((void *) paddr, 0, n * PAGE_SIZE);
+	return paddr;
+}
+
+
 // main code of the kernel
 void kernel_main(void) {
 	// initialize the bss section to 0
@@ -133,7 +149,12 @@ void kernel_main(void) {
 
 	// tells the CPU where the exception handler is
 	WRITE_CSR(stvec, (uint32_t) kernel_entry);
-	__asm__ __volatile__("unimp");
+	
+	paddr_t paddr0 = alloc_pages(2);
+	paddr_t paddr1 = alloc_pages(1);
+	
+	printf("alloc_pages test: paddr0=%x\n", paddr0);
+	printf("alloc_pages test: paddr1=%x\n", paddr1);
 
 	printf("\n\nHello %s\n", "World!");
 	printf("1 + 2 = %d, %x\n", 1 + 2, 0x1234abcd);
