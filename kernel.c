@@ -269,11 +269,15 @@ void yield(void) {
 // TEST PROCESSES
 struct process *proc_a;
 struct process *proc_b;
+struct process *proc_c;
+struct process *proc_d;
+struct process *proc_e;
+struct process *proc_f;
 
 void proc_a_entry(void) {
 	printf("starting process A\n");
 	while(1) {
-		printf("fuck");
+		printf("1");
 		yield();
 	}
 }
@@ -281,7 +285,43 @@ void proc_a_entry(void) {
 void proc_b_entry(void) {
 	printf("starting process B\n");
 	while(1) {
-		printf("shit");
+		printf("2");
+		yield();
+	}
+}
+
+void proc_c_entry(void) {
+	printf("starting process C\n");
+	while(1) {
+		printf("3");
+		yield();
+	}
+}
+
+void proc_d_entry(void) {
+	printf("starting process D\n");
+	while(1) {
+		printf("4");
+		yield();
+	}
+}
+void proc_e_entry(void) {
+	printf("starting process E\n");
+	while(1) {
+		printf("5");
+		yield();
+	}
+}
+
+void proc_f_entry(void) {
+	printf("starting process F\n");
+	int count = 0;
+	while(1) {
+		printf("6");
+		count++;
+		if(count >= 100) {
+			PANIC("RAAAHHHH");
+		}
 		yield();
 	}
 }
@@ -309,6 +349,10 @@ void kernel_main(void) {
 
 	proc_a = create_process((uint32_t) proc_a_entry);
 	proc_b = create_process((uint32_t) proc_b_entry);
+	proc_c = create_process((uint32_t) proc_c_entry);
+	proc_d = create_process((uint32_t) proc_d_entry);
+	proc_e = create_process((uint32_t) proc_e_entry);
+	proc_f = create_process((uint32_t) proc_f_entry);
 	
 	yield();
 	PANIC("unreachable here!");
