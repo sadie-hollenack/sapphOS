@@ -6,6 +6,14 @@
 #define PROC_UNUSED 0 // unused process control structure
 #define PROC_RUNNABLE 1 // runnable process
 
+// Macros for paging
+#define SATP_SV32 (1u << 31) // sets a single bit in the satp register to enable Sv32 mode
+#define PAGE_V (1 << 0) // "Valid" bit (entry is enabled)
+#define PAGE_R (1 << 1) // Readable
+#define PAGE_W (1 << 2) // Writable
+#define PAGE_X (1 << 3) // Executable
+#define PAGE_U (1 << 4) // User (accessible in user mode)
+
 #define PANIC(fmt, ...)                                                   \
     do {                                                                       \
         printf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);  \
@@ -28,6 +36,7 @@ struct process {
     int pid;
     int state; // can either be PROC_UNUSED or PROC_RUNNABLE
     vaddr_t sp; // points to the top of this processes sp
+    uint32_t *page_table; // pointer to the first elvel page table
     uint8_t stack[8192]; // the stack of the process
 };
 

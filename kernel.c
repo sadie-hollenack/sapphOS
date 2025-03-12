@@ -8,7 +8,7 @@ typedef uint32_t size_t;
 
 // bss: section of the kernel stack of data with an inital value of zero
 // char type doesnt matter, we simply want the addresses of the symbols
-extern char __bss[], __bss_end[], __stack_top[], __free_ram[], __free_ram_end[];
+extern char __kernel_base[], __bss[], __bss_end[], __stack_top[], __free_ram[], __free_ram_end[];
 
 // makes a call to the sbi allowing the user to make elevated calls
 // function will change depending on what values are passed into fid and eid
@@ -145,6 +145,42 @@ paddr_t alloc_pages(uint32_t n) {
 	return paddr;
 }
 
+// creating page tables
+void map_page(uint32_t *table1, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
+	// checks if the virtual address and padding address is aligned to the page size
+	if(!is_aligned(vaddr, PAGE_SIZE)) {
+		PANIC("unaligned vaddr %x", vaddr);
+	}
+
+	if(!is_aligned(paddr, PAGE_SIZE)) {
+		PANIC("unaligned paddr %x", paddr);
+	}
+	// calculates the fist-level page table index by shifting all bits 22 place to the right
+	// then masks them with the bitwise and operator (&)
+	// ex: vaddr = 0001001000 1101000101 011001111000
+	// shifted right (vaddr >> 22) = 000000000000000000000 1001000
+	// masked (& 0x3ff) = 000000000000000000000 1001000
+	uint32_t vpn1 = (vaddr >> 22) & 0x3ff;
+	// checks if the second level page table exists by indexing the page table and checking
+	// if the last bit that is returned is a 1
+	if((table1[vpn1] & PAGE_V) == 0){
+		// allocates a new page which will be the second level page table
+		uint32_t pt_paddr = alloc_pages(1);
+		// sets the first level page table to point to the second level page table and tacks on 
+		// a 1 at the end of the address to mark the entry as valid
+		table1[vpn1] = ((pt_paddr / PAGE_SIZE) << 10) | PAGE_V;
+	}
+
+	// similar to how vpn1 is calculated
+	// ex: vaddr = 0001001000 1101000101 011001111000
+	// shift right (vaddr >> 12) = 000000000000 0001001000 1101000101
+	// mask ($ 0x3ff) = 00000000000000000000001101000101
+	uint32_t vpn0 = (vaddr >> 12) & 0x3ff;
+	uint32_t *table0 = (uint32_t *) ((table1[vpn1] >> 10) * PAGE_SIZE);
+	// divides by PAGE_SIZE since we are storing the page number, not the physical address
+	table0[vpn0] = ((paddr / PAGE_SIZE) << 10) | flags | PAGE_V;
+}
+
 // allocates all registers to the top of the process's stack
 __attribute__((naked)) void switch_context(uint32_t *prev_sp, uint32_t *next_sp) {
 	asmv(
@@ -187,6 +223,7 @@ __attribute__((naked)) void switch_context(uint32_t *prev_sp, uint32_t *next_sp)
 	);
 }
 
+// PROCESSES
 // process initialization
 struct process procs[PROCS_MAX];
 
@@ -222,10 +259,16 @@ struct process *create_process(uint32_t pc) {
     *--sp = 0;                      // s0
     *--sp = (uint32_t) pc;          // ra
 
+	// map kernel pages
+	uint32_t *page_table = (uint32_t *) alloc_pages(1);
+	for(paddr_t paddr = (paddr_t) __kernel_base; paddr < (paddr_t) __free_ram_end; paddr += PAGE_SIZE) {
+		map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
+	}
 	// Initialize fields
 	proc->pid = i + 1;
 	proc->state = PROC_RUNNABLE;
 	proc->sp = (uint32_t) sp;
+	proc->page_table = page_table;
 	return proc;
 }
 
@@ -255,9 +298,13 @@ void yield(void) {
 	}
 
 	asmv(
+		"sfence.vma\n"
+		"csrw satp, %[satp]\n"
+		"sfence.vma\n"
 		"csrw sscratch, %[sscratch]\n"
 		:
-		: [sscratch] "r" ((uint32_t) &next->stack[sizeof(next->stack)]) // calculates the top of the stack
+		: [satp] "r" (SATP_SV32 | ((uint32_t) next->page_table /PAGE_SIZE)), 
+		[sscratch] "r" ((uint32_t) &next->stack[sizeof(next->stack)]) // calculates the top of the stack
 	);
 
 	// Context switch
@@ -266,13 +313,9 @@ void yield(void) {
 	switch_context(&prev->sp, &next->sp);
 }
 
-// TEST PROCESSES
+// test processes
 struct process *proc_a;
 struct process *proc_b;
-struct process *proc_c;
-struct process *proc_d;
-struct process *proc_e;
-struct process *proc_f;
 
 void proc_a_entry(void) {
 	printf("starting process A\n");
@@ -284,45 +327,14 @@ void proc_a_entry(void) {
 
 void proc_b_entry(void) {
 	printf("starting process B\n");
+	int i = 0;
 	while(1) {
 		printf("2");
 		yield();
-	}
-}
-
-void proc_c_entry(void) {
-	printf("starting process C\n");
-	while(1) {
-		printf("3");
-		yield();
-	}
-}
-
-void proc_d_entry(void) {
-	printf("starting process D\n");
-	while(1) {
-		printf("4");
-		yield();
-	}
-}
-void proc_e_entry(void) {
-	printf("starting process E\n");
-	while(1) {
-		printf("5");
-		yield();
-	}
-}
-
-void proc_f_entry(void) {
-	printf("starting process F\n");
-	int count = 0;
-	while(1) {
-		printf("6");
-		count++;
-		if(count >= 100) {
-			PANIC("RAAAHHHH");
+		++i;
+		if(i == 100) {
+			PANIC("STAHHHPPPP");
 		}
-		yield();
 	}
 }
 
@@ -346,14 +358,9 @@ void kernel_main(void) {
 	idle_proc = create_process((uint32_t) NULL);
 	idle_proc->pid = -1;
 	current_proc = idle_proc;
-
 	proc_a = create_process((uint32_t) proc_a_entry);
 	proc_b = create_process((uint32_t) proc_b_entry);
-	proc_c = create_process((uint32_t) proc_c_entry);
-	proc_d = create_process((uint32_t) proc_d_entry);
-	proc_e = create_process((uint32_t) proc_e_entry);
-	proc_f = create_process((uint32_t) proc_f_entry);
-	
+
 	yield();
 	PANIC("unreachable here!");
 }
