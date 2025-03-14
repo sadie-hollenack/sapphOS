@@ -2,7 +2,7 @@ ENTRY(start)
 
 SECTIONS {
     /* starts at 0x10000000 to not overlap with the kernels address space */
-    . = 0x10000000;
+    . = 0x1000000;
 
     /* machine code */
     .text :{
